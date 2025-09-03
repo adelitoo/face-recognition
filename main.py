@@ -1,37 +1,56 @@
 import cv2
-import os
+import mediapipe as mp
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.core.base_options import BaseOptions
 
-cv2.namedWindow("preview")
-webcam = cv2.VideoCapture(0)
+# Gesture recognizer
+base_options = BaseOptions(model_asset_path="gesture_recognizer.task")
+options = vision.GestureRecognizerOptions(base_options=base_options)
+recognizer = vision.GestureRecognizer.create_from_options(options)
 
-face_classifier = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
-
-if not webcam.isOpened():
-    print("Cannot open webcam")
-    exit()
-
-while True:
-    ret, frame = webcam.read()
-    if not ret:
-        print("Cannot read frame")
-        break
-
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    faces = face_classifier.detectMultiScale(frame, scaleFactor=1.1, minNeighbors=15, minSize=(40,40))
-
-    for face in faces:
-        print(face)
-        x, y, w, h = face
-        cv2.putText(frame, "face", (x, y - 15), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 0, 0), 2)
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 4)
-
-    cv2.imshow("preview", frame)
-    if cv2.waitKey(1) == ord("q"):
-        break
+# Aliases
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+mp_hands = mp.solutions.hands
 
 
-cv2.destroyWindow("preview")
-webcam.release()
+cap = cv2.VideoCapture(0)
+
+with mp_hands.Hands(
+    model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5
+) as hands:
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            continue
+
+        frame.flags.writeable = False
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb_frame)
+
+        frame.flags.writeable = True
+        frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        recognized_gesture = recognizer.recognize(mp_img)
+
+        if recognized_gesture.gestures:
+            gesture_label = recognized_gesture.gestures[0][0].category_name
+            print(gesture_label)
+
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    frame,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS,
+                    mp_drawing_styles.get_default_hand_landmarks_style(),
+                    mp_drawing_styles.get_default_hand_connections_style(),
+                )
+
+        cv2.imshow("MediaPipe Hands", cv2.flip(frame, 1))
+        if cv2.waitKey(5) & 0xFF == 27:
+            break
+
+cap.release()
+cv2.destroyAllWindows()
